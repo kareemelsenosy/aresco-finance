@@ -43,6 +43,9 @@ TARGETS: dict[str, dict] = {
         "label": "AR sub-ledger",
         "fields": {
             "customer_name": "Customer / debtor name",
+            # Without this an older sub-ledger would land dated today and become
+            # the latest snapshot, silently replacing the live aging view.
+            "snapshot_date": "The 'as at' date of the sub-ledger extract",
             "ar_class": "Accounting class: trade, contract_asset or retention",
             "category": "Business unit the debt sits in, e.g. Factory or Projects",
             "currency": "Currency code, e.g. EGP or USD",
@@ -138,8 +141,18 @@ def read_table(filename: str, raw: bytes) -> tuple[list[str], list[list]]:
         wb.close()
     else:
         text = raw.decode("utf-8-sig", errors="replace")
-        dialect = csv.Sniffer().sniff(text[:4000], delimiters=",;\t|") \
-            if text.strip() else csv.excel
+        # Sniffer raises on perfectly good files — a quoted field containing a
+        # comma is enough to defeat it — so its verdict is a hint, not a gate.
+        dialect = csv.excel
+        try:
+            dialect = csv.Sniffer().sniff(text[:4000], delimiters=",;\t|")
+        except csv.Error:
+            first = text.splitlines()[0] if text.splitlines() else ""
+            for d in (";", "\t", "|"):
+                if first.count(d) > first.count(","):
+                    dialect = csv.excel
+                    dialect.delimiter = d
+                    break
         grid = [r for r in csv.reader(io.StringIO(text), dialect)]
 
     # The header is the first row with at least two non-empty cells — exports
