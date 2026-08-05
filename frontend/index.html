@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARESCO Treasury &amp; Finance</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="style.css?v=10">
+</head>
+<body>
+<div class="shell" id="shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="assets/logo.png" alt="ARESCO">
+      <div class="sub">Treasury &amp; Finance</div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">
+      <div class="meta">ARESCO · QALAA<br>INTERNAL · 2026</div>
+      <button class="icon-btn" id="theme-btn" title="Light / dark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"></path>
+        </svg>
+      </button>
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <div style="min-width:0">
+        <div class="eyebrow" id="eyebrow">Treasury</div>
+        <h1 id="title">Cash Dashboard</h1>
+      </div>
+      <div class="right">
+        <div class="pill"><span class="live"></span><span class="k">As of</span><span class="v" id="asof">—</span></div>
+        <div class="pill"><span class="k">FX</span><span class="v" id="fxpill">—</span></div>
+        <div class="pill" style="gap:9px;padding:6px 12px">
+          <span class="avatar">HF</span>
+          <span style="font-size:13px;color:var(--ink-2)">H. Fahmy · <span class="muted">Treasury Mgr</span></span>
+        </div>
+      </div>
+    </header>
+    <div class="page" id="page"><div class="loading">Loading…</div></div>
+  </main>
+</div>
+
+<dialog id="dlg">
+  <h3 id="dlg-title">Adjust forecast</h3>
+  <div class="body" id="dlg-body"></div>
+  <div class="actions">
+    <button class="btn" onclick="document.getElementById('dlg').close()">Cancel</button>
+    <button class="btn primary" id="dlg-save">Save</button>
+  </div>
+</dialog>
+
+<script src="app.js?v=10"></script>
+</body>
+</html>
