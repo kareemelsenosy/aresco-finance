@@ -71,6 +71,61 @@ the app works without one.
 
 ---
 
+## Sign-in
+
+Access is limited to **@aresco.com.eg** addresses. Anything else is refused at
+sign-up and at login.
+
+First time for an address:
+
+1. Enter the ARESCO email on the login page.
+2. A six-digit code is emailed; it expires in 15 minutes.
+3. Enter the code, then choose a password (10+ characters, letters mixed with
+   numbers or symbols).
+
+After that it is email + password. Sessions last 12 hours and are held in an
+HttpOnly cookie. Eight wrong passwords locks the account for 15 minutes.
+
+### Mail
+
+Verification codes need SMTP. Set these in `.env`:
+
+```
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_USER=no-reply@aresco.com.eg
+SMTP_PASSWORD=...
+SMTP_FROM=no-reply@aresco.com.eg
+SMTP_STARTTLS=true
+```
+
+**With `SMTP_HOST` empty the code is not emailed — it is written to the server
+log instead.** That keeps the flow testable on a machine with no mail relay,
+but it means anyone who can read the log can complete someone else's sign-up.
+Configure SMTP before the tool is used by more than yourself.
+
+`SECRET_KEY` signs the session cookies. It must be a long random string and
+must not change, or everyone is signed out:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+### Access is gated in one place
+
+`api/gate.py` is middleware in front of every route, default-deny with a small
+allow-list (the login page, its assets, `/health`, the `/auth/*` endpoints).
+A new router is therefore protected the moment it is added — there is no
+per-route decorator to forget. `/docs` is behind it too.
+
+### The figures are shared
+
+Every signed-in user sees the same cash position, receivables and reporting —
+an account is an access grant, not a private slice of the data. Only sign-in
+state is per-user.
+
+---
+
 ## What must never come back into this repo
 
 | Category | Examples |

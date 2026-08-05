@@ -19,6 +19,53 @@ from sqlalchemy.orm import relationship
 from api.database import Base
 
 
+class User(Base):
+    """An ARESCO staff account. Registration is limited to the allowed domain.
+
+    The finance figures are company-wide, so an account is an access grant —
+    there is no per-user slice of the data.
+    """
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(200), unique=True, nullable=False, index=True)
+    full_name = Column(String(200), default="")
+    password_hash = Column(String(255))  # null until the first password is set
+    is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
+
+    email_verified_at = Column(DateTime)
+    last_login_at = Column(DateTime)
+    failed_logins = Column(Integer, default=0)
+    locked_until = Column(DateTime)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    @property
+    def display_name(self) -> str:
+        return self.full_name or self.email.split("@")[0].replace(".", " ").title()
+
+    @property
+    def initials(self) -> str:
+        parts = [p for p in self.display_name.replace(".", " ").split() if p]
+        return "".join(p[0] for p in parts[:2]).upper() or "?"
+
+
+class EmailVerification(Base):
+    """A pending six-digit sign-up code. One live row per address."""
+
+    __tablename__ = "email_verifications"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(200), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, default=0)
+    consumed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # --- Reference data seeded on first run -------------------------------------
 
 # (canonical name, comma-separated aliases as they appear across the workbooks)

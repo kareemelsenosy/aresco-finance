@@ -14,6 +14,26 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./aresco_finance.db"
     upload_dir: str = "./uploads"
     max_upload_mb: int = 200
+    # Signs session cookies and verification codes. Set a real value in .env —
+    # changing it invalidates every existing session.
+    secret_key: str = "change-me"
+
+    # --- Access control ---
+    app_display_name: str = "ARESCO Treasury & Finance"
+    # Only addresses at this domain may register or sign in.
+    allowed_email_domain: str = "aresco.com.eg"
+    session_hours: int = 12
+    code_ttl_minutes: int = 15
+
+    # --- Outbound mail (verification codes) ---
+    # With no smtp_host the code is written to the server log instead.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    smtp_ssl: bool = False
 
     # --- Reporting defaults ---
     base_currency: str = "EGP"

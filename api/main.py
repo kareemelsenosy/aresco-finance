@@ -25,8 +25,10 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.database import init_db
+from api.gate import AuthGate
 from api.routers import (
-    admin, audit, cash, commitments, ecl, forecast, ingest, receivables, reporting,
+    admin, audit, auth, cash, commitments, ecl, forecast, ingest, receivables,
+    reporting,
 )
 
 app = FastAPI(
@@ -37,14 +39,21 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# The gate runs in front of every route except the login flow itself.
+app.add_middleware(AuthGate)
+
+# Same-origin front end, so no cross-origin allowance is needed. A wildcard
+# origin is also invalid alongside credentialed requests, which the session
+# cookie now makes.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(ingest.router)
 app.include_router(cash.router)

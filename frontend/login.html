@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — ARESCO</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg"><link rel="alternate icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d2034'/%3E%3Cg fill='none' stroke='%23c9a13f' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 49 L32 15 L47 49'/%3E%3Cpath d='M23 38 H41'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-display:"Space Grotesk","Helvetica Neue",sans-serif;
+    --font-body:"IBM Plex Sans","Helvetica Neue",sans-serif;
+    --font-mono:"IBM Plex Mono",ui-monospace,monospace;
+    --navy:#0d2034; --navy-2:#102a45;
+    --gold:#b3892f; --gold-bright:#c9a13f; --gold-soft:#f1e6cf;
+    --bg:#f5f6f4; --surface:#fff; --surface-2:#fbfbfa;
+    --ink:#131e2b; --ink-2:#475360; --ink-3:#6b7682;
+    --line:#e4e7e4; --line-2:#eef0ee;
+    --ok:#2f7d5b; --ok-soft:#e3f1ea; --ok-line:#bcdccb;
+    --bad:#b14a3c; --bad-soft:#f6e3df; --bad-line:#e6bcb3;
+    --warn:#b6831f; --warn-soft:#f8eed5; --warn-line:#e8d6a6;
+    --focus:oklch(0.50 0.085 232);
+  }
+  [data-theme="dark"]{
+    --bg:#0b1520; --surface:#111e2c; --surface-2:#0f1a26;
+    --ink:#e8edf2; --ink-2:#a8b6c4; --ink-3:#7d8b99;
+    --line:#1e2f42; --line-2:#182636;
+    --ok-soft:#12291f; --ok-line:#245c43;
+    --bad-soft:#2c1714; --bad-line:#6b2f26;
+    --warn-soft:#2a2213; --warn-line:#5f4a1c;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;font-family:var(--font-body);background:var(--bg);color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{min-height:100%;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}
+
+  /* ---------- left: brand panel ---------- */
+  .brandside{
+    position:relative;background:var(--navy);color:#fff;padding:48px 52px;
+    display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;
+  }
+  .brandside::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(700px 380px at 12% 8%, rgba(201,161,63,.16), transparent 62%),
+      repeating-linear-gradient(135deg, rgba(255,255,255,.028) 0 2px, transparent 2px 9px);
+  }
+  .mark{display:flex;align-items:center;gap:14px;position:relative;z-index:1}
+  .mark svg{width:44px;height:44px;flex:none}
+  .mark .wordmark{font-family:var(--font-display);font-weight:700;font-size:19px;letter-spacing:.16em}
+  .pitch{position:relative;z-index:1;max-width:30ch}
+  .pitch h2{
+    font-family:var(--font-display);font-weight:600;font-size:clamp(26px,3.1vw,40px);
+    line-height:1.14;margin:0 0 16px;letter-spacing:-.015em;
+  }
+  .pitch p{margin:0;color:#a9bdd2;font-size:15px;line-height:1.65}
+  .rule{height:1px;background:linear-gradient(90deg,var(--gold-bright),transparent);margin:22px 0;max-width:190px}
+  .foot{position:relative;z-index:1;font-size:11px;letter-spacing:.13em;color:#6f88a1;text-transform:uppercase}
+
+  /* ---------- right: form ---------- */
+  .formside{display:flex;align-items:center;justify-content:center;padding:40px 32px;background:var(--bg)}
+  .card{width:100%;max-width:404px}
+  .eyebrow{
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-3);margin-bottom:9px;
+  }
+  h1{font-family:var(--font-display);font-weight:600;font-size:27px;letter-spacing:-.01em;margin:0 0 8px}
+  .lede{color:var(--ink-2);font-size:14.5px;line-height:1.6;margin:0 0 26px}
+
+  label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin:0 0 7px;letter-spacing:.01em}
+  .field{margin-bottom:16px}
+  input{
+    width:100%;padding:12px 14px;font-family:var(--font-body);font-size:15px;color:var(--ink);
+    background:var(--surface);border:1px solid var(--line);border-radius:9px;transition:border-color .13s,box-shadow .13s;
+  }
+  input::placeholder{color:var(--ink-3)}
+  input:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3.5px color-mix(in oklch,var(--focus) 17%,transparent)}
+  input:disabled{background:var(--surface-2);color:var(--ink-3)}
+  input.code{
+    font-family:var(--font-mono);font-size:27px;letter-spacing:.38em;text-align:center;
+    padding:14px 10px 14px 22px;font-weight:500;
+  }
+  .hint{font-size:12.5px;color:var(--ink-3);margin-top:7px;line-height:1.5}
+
+  button{
+    width:100%;padding:12.5px 16px;font-family:var(--font-body);font-size:14.5px;font-weight:600;
+    color:#fff;background:var(--navy);border:1px solid var(--navy);border-radius:9px;cursor:pointer;
+    transition:background .13s,transform .06s;
+  }
+  button:hover:not(:disabled){background:var(--navy-2)}
+  button:active:not(:disabled){transform:translateY(1px)}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  button.ghost{background:transparent;color:var(--ink-2);border-color:var(--line)}
+  button.ghost:hover:not(:disabled){background:var(--surface-2);color:var(--ink)}
+
+  .msg{
+    padding:11px 13px;border-radius:9px;font-size:13.5px;line-height:1.55;margin-bottom:18px;
+    border:1px solid transparent;
+  }
+  .msg.err{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
+  .msg.ok{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok)}
+  .msg.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+  .msg code{font-family:var(--font-mono);font-size:13px}
+  [data-theme="dark"] .msg.err{color:#f0a99c}
+  [data-theme="dark"] .msg.ok{color:#8fd3b1}
+  [data-theme="dark"] .msg.warn{color:#e3c47e}
+
+  .switch{margin-top:22px;padding-top:19px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-2);text-align:center}
+  .switch a{color:var(--ink);font-weight:600;text-decoration:none;border-bottom:1.5px solid var(--gold);cursor:pointer;padding-bottom:1px}
+  .switch a:hover{color:var(--gold)}
+
+  .steps{display:flex;gap:7px;margin-bottom:22px}
+  .steps i{height:3px;flex:1;border-radius:2px;background:var(--line);transition:background .22s}
+  .steps i.on{background:var(--gold)}
+
+  .domain{
+    display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:12px;
+    color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;margin-bottom:20px;
+  }
+  .domain b{color:var(--ink);font-weight:600}
+  .hide{display:none !important}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);
+    border-top-color:#fff;border-radius:50%;animation:sp .6s linear infinite;vertical-align:-2px;margin-right:7px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  @media (max-width:860px){
+    .wrap{grid-template-columns:1fr}
+    .brandside{padding:30px 26px;min-height:auto}
+    .pitch{display:none}
+    .brandside{flex-direction:row;align-items:center;justify-content:space-between}
+    .rule{display:none}
+    .formside{padding:34px 22px 56px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <aside class="brandside">
+    <div class="mark">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" rx="14" fill="#0d2034" stroke="rgba(255,255,255,.14)"></rect>
+        <g fill="none" stroke="#c9a13f" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 49 L32 15 L47 49"></path><path d="M23 38 H41"></path>
+        </g>
+      </svg>
+      <div>
+        <div class="wordmark">ARESCO</div>
+        <div style="font-size:11px;letter-spacing:.12em;color:#7f96ad;text-transform:uppercase" id="brand-sub">Treasury &amp; Finance</div>
+      </div>
+    </div>
+
+    <div class="pitch">
+      <h2 id="pitch-h">The cash position,<br>as of this morning.</h2>
+      <div class="rule"></div>
+      <p id="pitch-p">Sign in with your ARESCO address. Balances, receivables,
+        forecasts and reporting — one shared view for the finance team.</p>
+    </div>
+
+    <div class="foot">ARESCO · QALAA HOLDINGS · INTERNAL</div>
+  </aside>
+
+  <main class="formside">
+    <div class="card">
+      <div class="steps hide" id="steps"><i id="s1"></i><i id="s2"></i><i id="s3"></i></div>
+
+      <div class="eyebrow" id="eyebrow">Secure access</div>
+      <h1 id="heading">Sign in</h1>
+      <p class="lede" id="lede">Use the ARESCO email address you were issued.</p>
+
+      <div class="domain">
+        Restricted to <b id="domain-label">@aresco.com.eg</b>
+      </div>
+
+      <div id="msg" class="msg hide" role="alert"></div>
+
+      <!-- ============ sign in ============ -->
+      <form id="form-login" autocomplete="on">
+        <div class="field">
+          <label for="li-email">ARESCO email</label>
+          <input id="li-email" type="email" autocomplete="username" placeholder="name@aresco.com.eg" required>
+        </div>
+        <div class="field">
+          <label for="li-pass">Password</label>
+          <input id="li-pass" type="password" autocomplete="current-password" placeholder="••••••••••" required>
+        </div>
+        <button type="submit" id="li-btn">Sign in</button>
+        <div class="switch">First time here? <a id="to-signup">Set up your account</a></div>
+      </form>
+
+      <!-- ============ step 1: request code ============ -->
+      <form id="form-email" class="hide">
+        <div class="field">
+          <label for="su-email">ARESCO email</label>
+          <input id="su-email" type="email" autocomplete="username" placeholder="name@aresco.com.eg" required>
+          <div class="hint">We will send a six-digit code to confirm the address is yours.</div>
+        </div>
+        <button type="submit" id="su-btn">Send code</button>
+        <div class="switch">Already set up? <a id="to-login">Sign in</a></div>
+      </form>
+
+      <!-- ============ step 2: enter code ============ -->
+      <form id="form-code" class="hide">
+        <div class="field">
+          <label for="cd-code">Six-digit code</label>
+          <input id="cd-code" class="code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                 autocomplete="one-time-code" placeholder="000000" required>
+          <div class="hint" id="code-hint">Sent to your address. It expires shortly.</div>
+        </div>
+        <button type="submit" id="cd-btn">Verify</button>
+        <div style="height:9px"></div>
+        <button type="button" class="ghost" id="cd-back">Use a different address</button>
+      </form>
+
+      <!-- ============ step 3: set password ============ -->
+      <form id="form-pass" class="hide">
+        <div class="field">
+          <label for="pw-name">Your name <span style="font-weight:400;color:var(--ink-3)">(optional)</span></label>
+          <input id="pw-name" type="text" autocomplete="name" placeholder="Kareem Elsenosy">
+        </div>
+        <div class="field">
+          <label for="pw-pass">Choose a password</label>
+          <input id="pw-pass" type="password" autocomplete="new-password" placeholder="At least 10 characters" required>
+          <div class="hint">At least 10 characters, mixing letters with numbers or symbols.</div>
+        </div>
+        <div class="field">
+          <label for="pw-conf">Confirm password</label>
+          <input id="pw-conf" type="password" autocomplete="new-password" placeholder="Type it again" required>
+        </div>
+        <button type="submit" id="pw-btn">Create account</button>
+      </form>
+    </div>
+  </main>
+</div>
+
+<script src="login.js?v=1"></script>
+</body>
+</html>

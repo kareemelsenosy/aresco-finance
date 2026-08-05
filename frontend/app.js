@@ -1625,3 +1625,20 @@ try {
 } catch (e) { /* private mode */ }
 
 render();
+
+/* ---------- signed-in user + sign out ---------- */
+(async function session() {
+  try {
+    const me = await (await fetch("/auth/me")).json();
+    const ini = document.getElementById("me-initials");
+    const nm = document.getElementById("me-name");
+    if (ini) ini.textContent = me.initials || "·";
+    if (nm) nm.textContent = me.name || me.email;
+  } catch (_) { /* the gate redirects if the session is gone */ }
+
+  const btn = document.getElementById("signout-btn");
+  if (btn) btn.onclick = async () => {
+    await fetch("/auth/logout", { method: "POST" });
+    window.location.href = "/app/login.html";
+  };
+})();

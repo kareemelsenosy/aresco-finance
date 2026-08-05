@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ARESCO Treasury &amp; Finance</title>
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 <div class="shell" id="shell">
@@ -37,8 +37,16 @@
         <div class="pill"><span class="live"></span><span class="k">As of</span><span class="v" id="asof">—</span></div>
         <div class="pill"><span class="k">FX</span><span class="v" id="fxpill">—</span></div>
         <div class="pill" style="gap:9px;padding:6px 12px">
-          <span class="avatar">HF</span>
-          <span style="font-size:13px;color:var(--ink-2)">H. Fahmy · <span class="muted">Treasury Mgr</span></span>
+          <span class="avatar" id="me-initials">·</span>
+          <span style="font-size:13px;color:var(--ink-2)" id="me-name">—</span>
+          <button class="icon-btn" id="signout-btn" title="Sign out"
+                  style="margin-left:2px;width:26px;height:26px;padding:0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <path d="m16 17 5-5-5-5M21 12H9"></path>
+            </svg>
+          </button>
         </div>
       </div>
     </header>
@@ -55,6 +63,6 @@
   </div>
 </dialog>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
