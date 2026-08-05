@@ -24,7 +24,28 @@ def get_db():
 def init_db():
     from api import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _migrate()
     _seed_reference_data()
+
+
+def _migrate():
+    """Additive column migrations for databases created before a column existed.
+
+    create_all() builds missing tables but never alters existing ones. Each
+    entry here is idempotent.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    wanted = {"receivables": [("ar_class", "VARCHAR")]}
+    with engine.begin() as conn:
+        for table, columns in wanted.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for name, sql_type in columns:
+                if name not in existing:
+                    conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN {name} {sql_type}'))
 
 
 def _seed_reference_data():

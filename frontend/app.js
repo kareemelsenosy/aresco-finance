@@ -133,6 +133,7 @@ const NAV = [
   {id:'tax',     label:'Tax & Gov. Dues',     eyebrow:'Compliance',     title:'Tax and governmental dues', group:'Commitments', icon:'M6 3h12l2 4H4ZM4 7h16v14H4zM9 12h6M9 16h6'},
   {id:'proc',    label:'PR → PO',             eyebrow:'Procurement',    title:'Purchase requisitions and orders — committed spend', group:'Commitments', icon:'M6 2h9l5 5v15H6zM15 2v5h5M9 13h7M9 17h4'},
   {id:'margin',  label:'Contribution Margin', eyebrow:'Controlling',    title:'Contribution margin and break-even', group:'Reporting', icon:'M4 20V10M10 20V4M16 20v-7M22 20H2'},
+  {id:'intake',  label:'Data Intake',         eyebrow:'Foundations',    title:'Data intake — what each team sends, and when', group:'System', icon:'M12 3v12M8 11l4 4 4-4M4 21h16M4 17v4M20 17v4'},
   {id:'data',    label:'Data & Sources',      eyebrow:'Foundations',    title:'Data, sources & ingest log', group:'System', icon:'M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3ZM4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3'},
 ];
 
@@ -1642,3 +1643,193 @@ render();
     window.location.href = "/app/login.html";
   };
 })();
+
+
+/* ------------------------------------------------------------ data intake */
+
+const PRIORITY_BADGE = {
+  highest: 'bad', core: 'gold', high: 'warn', medium: 'neutral', setup: 'neutral',
+};
+const STATE_LABEL = {
+  never:   ['bad',     'Never received'],
+  overdue: ['warn',    'Overdue'],
+  current: ['ok',      'Up to date'],
+  received:['ok',      'Received'],
+  in_tool: ['neutral', 'Done in the tool'],
+};
+
+views.intake = async function () {
+  const data = await get('/intake/requirements');
+  intakeState.reqs = {};
+  data.teams.forEach(t => t.items.forEach(i => { intakeState.reqs[i.id] = i; }));
+
+  const c = data.counts;
+  const sections = data.teams.map(t => `
+    <div class="intake-team">
+      <div class="intake-team-head"><span>${esc(t.team)}</span><span class="muted">${t.items.length} item${t.items.length > 1 ? 's' : ''}</span></div>
+      ${t.items.map(intakeCard).join('')}
+    </div>`).join('');
+
+  page.innerHTML = `
+    <div class="intro">
+      <p>Everything the tool needs, who owns it, and how often. Each row takes the file
+         in whatever shape your system exports it — column names do not have to match
+         ours${data.ai_available ? '' : ' <b>(column mapping needs ANTHROPIC_API_KEY, which is not set)</b>'}.</p>
+    </div>
+    <div class="tiles-4">
+      <div class="tile"><div class="k">Tracked</div><div class="v">${c.total}</div><div class="n">data requirements</div></div>
+      <div class="tile ok"><div class="k">Up to date</div><div class="v">${c.current}</div><div class="n">received within their cycle</div></div>
+      <div class="tile gold"><div class="k">Overdue</div><div class="v">${c.overdue}</div><div class="n">past their frequency</div></div>
+      <div class="tile ${c.never ? 'bad' : 'grey'}"><div class="k">Never received</div><div class="v">${c.never}</div><div class="n">nothing loaded yet</div></div>
+    </div>
+    <div id="intake-result"></div>
+    ${sections}`;
+};
+
+const intakeState = {reqs: {}, pending: null};
+
+function intakeCard(i) {
+  const [badge, label] = STATE_LABEL[i.state] || ['neutral', i.state];
+  // last_at is a full timestamp; dayLong takes a date-only string.
+  const last = i.last_at
+    ? `Last: ${esc(i.last_file || '')} · ${dayLong(i.last_at.slice(0, 10))}${i.last_rows ? ` · ${i.last_rows} rows` : ''}`
+    : 'Nothing received yet';
+
+  let action;
+  if (i.handler_kind === 'in_tool') {
+    action = `<a class="btn" href="#${esc(i.goto || 'ar')}">Open ${esc(i.goto || 'the screen')}</a>`;
+  } else {
+    action = `
+      <input type="file" id="f-${esc(i.id)}" accept="${esc(i.accepts || '')}" style="display:none"
+             onchange="intakeUpload('${esc(i.id)}', this)">
+      <button class="btn primary" onclick="document.getElementById('f-${esc(i.id)}').click()">Upload</button>`;
+  }
+
+  return `
+    <div class="intake-row" id="row-${esc(i.id)}">
+      <div class="intake-no">${i.no}</div>
+      <div class="intake-main">
+        <div class="intake-need">${esc(i.need)}</div>
+        <div class="intake-meta">
+          <span class="badge ${PRIORITY_BADGE[i.priority] || 'neutral'}">${esc(i.priority)}</span>
+          <span class="badge ${badge}">${esc(label)}</span>
+          <span>${esc(i.format)}</span><span class="sep">·</span><span>${esc(i.frequency)}</span>
+        </div>
+        <div class="intake-last">${last}</div>
+      </div>
+      <div class="intake-act">${action}</div>
+    </div>`;
+}
+
+async function intakeUpload(reqId, input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const row = document.getElementById('row-' + reqId);
+  const box = document.getElementById('intake-result');
+  row.classList.add('busy');
+  box.innerHTML = notice('info', '', `Reading <b>${esc(file.name)}</b>…`);
+  box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch(API + `/intake/${reqId}/upload`, {method: 'POST', body: fd});
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.detail || `Upload failed (${res.status})`);
+
+    if (out.status === 'loaded' || out.status === 'filed') {
+      box.innerHTML = notice('ok', 'Loaded',
+        `<b>${esc(out.file)}</b> — ${intakeSummary(out)}`);
+      views.intake();
+    } else if (out.mode === 'mapping') {
+      intakeState.pending = out;
+      box.innerHTML = renderMapping(reqId, out);
+      box.scrollIntoView({behavior: 'smooth', block: 'start'});
+    } else if (out.mode === 'fs_pdf') {
+      box.innerHTML = notice('warn', 'Transcribed — needs review',
+        `<b>${esc(out.file)}</b> was read with vision. Check the cross-footing report
+         under Data &amp; Sources before it is loaded into reporting.`);
+    }
+  } catch (err) {
+    box.innerHTML = notice('bad', 'Could not read that file', esc(err.message));
+  } finally {
+    row.classList.remove('busy');
+  }
+}
+
+function intakeSummary(out) {
+  if (out.message) return esc(out.message);
+  const bits = [];
+  if (out.created !== undefined) bits.push(`${out.created} created`);
+  if (out.updated) bits.push(`${out.updated} updated`);
+  if (out.loaded !== undefined) bits.push(`${out.loaded} loaded`);
+  if (out.rows_out !== undefined) bits.push(`${out.rows_out} rows`);
+  if (out.failed) bits.push(`${out.failed} rejected`);
+  return bits.join(' · ') || 'done';
+}
+
+function renderMapping(reqId, m) {
+  const mapped = m.mapping.filter(x => x.target_field);
+  const rows = mapped.map(x => `<tr>
+    <td style="font-size:13px">${esc(x.source_column)}</td>
+    <td style="font:500 12px var(--font-mono)">${esc(x.target_field)}</td>
+    <td><span class="badge ${x.confidence === 'high' ? 'ok' : x.confidence === 'medium' ? 'warn' : 'bad'}">${esc(x.confidence)}</span></td>
+    <td class="muted" style="font-size:12px">${esc(x.reason || '')}</td></tr>`);
+
+  const cols = mapped.map(x => x.target_field);
+  const preview = m.preview.map(r => `<tr>${cols.map(c =>
+    `<td style="font-size:12.5px">${esc(String(r[c] ?? ''))}</td>`).join('')}</tr>`);
+
+  const consts = Object.entries(m.constants || {});
+
+  return `
+    <div class="card mapping">
+      <div class="card-h">
+        <h3>Check this mapping before it is written</h3>
+        <span class="stamp">${esc(m.file)} → ${esc(m.label)}</span>
+      </div>
+      <div class="card-b">
+        ${m.warnings.length ? noticeList(m.warnings, 'warn', 'Worth reading first') : ''}
+        <p class="muted" style="margin:0 0 14px">
+          <b>${m.rows_ready}</b> of ${m.rows_in} rows are ready to write${m.rows_skipped ? `, ${m.rows_skipped} skipped as blank or missing a required field` : ''}.
+          Nothing has been saved yet.
+        </p>
+        ${table('<th>Your column</th><th>Goes to</th><th>Confidence</th><th>Why</th>', rows)}
+        ${consts.length ? `<p class="muted" style="margin:12px 0 0">Applied to every row: ${
+          consts.map(([k, v]) => `<code>${esc(k)}=${esc(v)}</code>`).join(' ')}</p>` : ''}
+        ${m.unmapped_columns.length ? `<p class="muted" style="margin:12px 0 0">
+          Ignored: ${m.unmapped_columns.map(c => `<code>${esc(c)}</code>`).join(' ')}</p>` : ''}
+        <h4 style="margin:20px 0 8px;font:600 13px var(--font-display)">First ${m.preview.length} rows as they would be saved</h4>
+        <div style="overflow-x:auto">${table(cols.map(c => `<th>${esc(c)}</th>`).join(''), preview)}</div>
+        <div class="mapping-act">
+          <button class="btn primary" onclick="intakeConfirm('${esc(reqId)}')" ${m.rows_ready ? '' : 'disabled'}>
+            Write ${m.rows_ready} row${m.rows_ready === 1 ? '' : 's'}
+          </button>
+          <button class="btn" onclick="intakeState.pending=null;document.getElementById('intake-result').innerHTML=''">Discard</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function intakeConfirm(reqId) {
+  const m = intakeState.pending;
+  if (!m) return;
+  const box = document.getElementById('intake-result');
+  box.innerHTML = notice('info', '', 'Writing…');
+  try {
+    const res = await fetch(API + `/intake/${reqId}/confirm`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({target: m.target, file: m.file, rows: m.rows}),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.detail || `Failed (${res.status})`);
+    intakeState.pending = null;
+    box.innerHTML = notice(out.failed ? 'warn' : 'ok', 'Written',
+      `<b>${esc(m.file)}</b> — ${intakeSummary(out)}` +
+      (out.errors && out.errors.length ? `<br><span class="muted">${out.errors.slice(0, 5).map(esc).join('<br>')}</span>` : ''));
+    views.intake();
+  } catch (err) {
+    box.innerHTML = notice('bad', 'Could not write those rows', esc(err.message));
+  }
+}

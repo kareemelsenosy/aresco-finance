@@ -189,6 +189,9 @@ class Receivable(Base):
     snapshot_date = Column(Date, nullable=False)
     customer_name = Column(String, nullable=False, index=True)
     category = Column(String, default="")          # Factory | Projects | Dormant | Forecast
+    # Accounting classification from the AR sub-ledger. Deliberately separate
+    # from `category`, which already carries the business unit.
+    ar_class = Column(String, default="")          # trade | contract_asset | retention
     currency = Column(String, default="EGP")
     amount = Column(Float, nullable=False, default=0.0)
     amount_egp = Column(Float, nullable=False, default=0.0)

@@ -14,6 +14,7 @@ ARESCO Finance — cash management, receivables, reporting, ECL and audit suppor
   /margin       contribution margin, company and per project
   /funding      the consolidated funding position
   /ingest       load the finance team's workbooks
+  /intake       one upload point per thing each team owes, with its status
   /dashboard    everything the landing page needs, in one call
 """
 
@@ -27,8 +28,8 @@ from fastapi.staticfiles import StaticFiles
 from api.database import init_db
 from api.gate import AuthGate
 from api.routers import (
-    admin, audit, auth, cash, commitments, ecl, forecast, ingest, receivables,
-    reporting,
+    admin, audit, auth, cash, commitments, ecl, forecast, ingest, intake,
+    receivables, reporting,
 )
 
 app = FastAPI(
@@ -56,6 +57,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(ingest.router)
+app.include_router(intake.router)
 app.include_router(cash.router)
 app.include_router(receivables.router)
 app.include_router(forecast.router)
