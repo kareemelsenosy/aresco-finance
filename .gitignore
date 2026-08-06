@@ -6,3 +6,8 @@ __pycache__/
 uploads/
 .DS_Store
 data/
+
+# install.sh drops the private repo's extracts here. This repo is public, so
+# they must never be committable — the sub-ledger and L/G register are real
+# ARESCO figures and belong only in aresco-finance-data.
+*.csv
