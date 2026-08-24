@@ -455,7 +455,8 @@ def _ingest_gov_dues(db: Session, ws, fname: str, warnings: list):
     return count
 
 
-def ingest_business_plan(db: Session, path: str, replace: bool = True) -> dict:
+def ingest_business_plan(db: Session, path: str, replace: bool = True,
+                         commit: bool = True) -> dict:
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     fname = path.rsplit("/", 1)[-1]
     warnings: list[str] = []
@@ -502,6 +503,9 @@ def ingest_business_plan(db: Session, path: str, replace: bool = True) -> dict:
             warnings="\n".join(warnings), ok=True,
         )
     )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     result["warnings"] = warnings
     return result

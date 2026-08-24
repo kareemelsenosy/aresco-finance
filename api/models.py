@@ -578,6 +578,9 @@ class DownPayment(Base):
     """
     __tablename__ = "down_payments"
     id = Column(Integer, primary_key=True)
+    # Which upload put this row here — the key "replace the previous
+    # upload of this item" deletes on.
+    source_file = Column(String, default="")
     direction = Column(String, nullable=False)        # received | paid
     counterparty = Column(String, nullable=False)
     counterparty_type = Column(String, default="")    # client | supplier
@@ -653,6 +656,9 @@ class PurchaseRequisition(Base):
     """A request to buy, before it becomes a commitment."""
     __tablename__ = "purchase_requisitions"
     id = Column(Integer, primary_key=True)
+    # Which upload put this row here — the key "replace the previous
+    # upload of this item" deletes on.
+    source_file = Column(String, default="")
     pr_number = Column(String, unique=True, nullable=False, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
     project_name = Column(String, default="")
@@ -682,6 +688,9 @@ class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
     __table_args__ = (Index("ix_po_delivery", "delivery_date"),)
     id = Column(Integer, primary_key=True)
+    # Which upload put this row here — the key "replace the previous
+    # upload of this item" deletes on.
+    source_file = Column(String, default="")
     po_number = Column(String, unique=True, nullable=False, index=True)
     pr_id = Column(Integer, ForeignKey("purchase_requisitions.id"))
     supplier = Column(String, nullable=False)
@@ -734,6 +743,9 @@ class ProjectCost(Base):
     """
     __tablename__ = "project_costs"
     id = Column(Integer, primary_key=True)
+    # Distinct from `source` below, which records provenance (erp / intake).
+    # This is the upload that wrote the row, for replacement.
+    source_file = Column(String, default="")
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     period = Column(String, nullable=False)           # 2026-03 | Q1-2026 | 2026
     category = Column(String, nullable=False)

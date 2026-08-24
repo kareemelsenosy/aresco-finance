@@ -446,13 +446,51 @@ def _apply_mapping(target: str, filename: str, headers, rows, plan: dict) -> dic
 # --- committing a reviewed preview ----------------------------------------
 
 
-def commit_rows(db: Session, target: str, filename: str, rows: list[dict]) -> dict:
+def supersede(db: Session, filenames) -> dict[str, int]:
+    """Delete every row that earlier uploads of this item put in the database.
+
+    A team re-sends the same register with corrections far more often than they
+    send a genuinely new one, so an upload replaces its predecessor rather than
+    stacking on top of it.
+
+    The sweep is across every table, not just the one target, because a single
+    workbook feeds several: Cash-In alone writes receivables, forecast inflows
+    and expense lines. `source_file` is what ties them together — deleting on it
+    removes exactly what those uploads wrote and leaves rows from other items,
+    and anything typed into the tool by hand, untouched.
+    """
+    files = {f for f in (filenames or ()) if f}
+    if not files:
+        return {}
+
+    from api.models import Base
+
+    removed: dict[str, int] = {}
+    seen: set[str] = set()
+    for mapper in Base.registry.mappers:
+        model = mapper.class_
+        table = model.__table__
+        if table.name in seen or "source_file" not in table.columns:
+            continue
+        seen.add(table.name)
+        n = (db.query(model)
+             .filter(model.source_file.in_(files))
+             .delete(synchronize_session=False))
+        if n:
+            removed[table.name] = n
+    return removed
+
+
+def commit_rows(db: Session, target: str, filename: str, rows: list[dict],
+                replaces=None) -> dict:
     """Write rows that came back from a reviewed preview."""
     if target not in TARGETS:
         raise ValueError(f"Unknown target '{target}'")
     spec = TARGETS[target]
     model = spec["model"]
     upsert_on = spec.get("upsert_on")
+
+    removed = supersede(db, set(replaces or ()) | {filename})
 
     written = updated = failed = 0
     errors: list[str] = []
@@ -475,6 +513,10 @@ def commit_rows(db: Session, target: str, filename: str, rows: list[dict]) -> di
                     continue
 
             obj = model(**row)
+            # Stamp before _post_fill so the row is attributable to this upload
+            # and the next one can find it to replace.
+            if "source_file" in model.__table__.columns:
+                obj.source_file = filename
             _post_fill(db, target, obj, raw_row)
             db.add(obj)
             db.flush()
@@ -493,14 +535,15 @@ def commit_rows(db: Session, target: str, filename: str, rows: list[dict]) -> di
     db.commit()
 
     return {"target": target, "file": filename, "created": written,
-            "updated": updated, "failed": failed, "errors": errors}
+            "updated": updated, "failed": failed, "replaced": removed,
+            "replaced_total": sum(removed.values()),
+            "errors": errors}
 
 
 def _post_fill(db: Session, target: str, obj, raw_row: dict):
     """Derived fields the source file never carries."""
     if target == "receivables":
         obj.snapshot_date = obj.snapshot_date or date.today()
-        obj.source_file = obj.source_file or "intake"
         if obj.amount is not None and obj.amount_egp in (None, 0):
             obj.amount_egp = _to_egp(db, obj.amount, obj.currency)
     elif target == "project_costs":
@@ -518,7 +561,6 @@ def _post_fill(db: Session, target: str, obj, raw_row: dict):
         obj.scope = obj.scope or "standalone"
     elif target == "checks":
         obj.snapshot_date = obj.snapshot_date or obj.check_date or date.today()
-        obj.source_file = obj.source_file or "intake"
         # A source with no status column cannot say a cheque was handed over.
         # Recording that as "not delivered" and flagging status_known=False keeps
         # it out of the cash position instead of quietly counting it as paid.
@@ -527,7 +569,6 @@ def _post_fill(db: Session, target: str, obj, raw_row: dict):
             obj.status_known = False
     elif target == "bank_balances":
         obj.balance_date = obj.balance_date or date.today()
-        obj.source_file = obj.source_file or "intake"
     elif target == "down-payments":
         if obj.amount is not None and not obj.amount_egp:
             obj.amount_egp = _to_egp(db, obj.amount, obj.currency)

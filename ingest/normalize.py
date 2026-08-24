@@ -20,6 +20,9 @@ from pathlib import Path
 
 ZIP_MAGIC = b"PK\x03\x04"          # xlsx/xlsm are zip archives
 OLE2_MAGIC = b"\xd0\xcf\x11\xe0"   # genuine legacy .xls (Excel 97-2003)
+PDF_MAGIC = b"%PDF"
+
+MAX_PDF_PAGES = 40   # past this it is a report to read with vision, not a register
 
 # Enough of the file to sniff a delimiter without reading a 30 MB export.
 _SNIFF_BYTES = 16000
@@ -35,6 +38,8 @@ def detect(raw: bytes) -> str:
         return "xlsx"
     if raw.startswith(OLE2_MAGIC):
         return "xls_legacy"
+    if raw.startswith(PDF_MAGIC):
+        return "pdf"
     for encoding in ("utf-16", "utf-8-sig", "utf-8", "cp1256", "latin-1"):
         try:
             sample = raw[:_SNIFF_BYTES].decode(encoding)
@@ -100,6 +105,82 @@ def _text_to_xlsx(raw: bytes, dest: Path) -> list[str]:
             f"and converted to .xlsx ({written} rows)."]
 
 
+def _pdf_to_xlsx(path: Path, dest: Path) -> list[str]:
+    """Pull the tables out of a text-layer PDF.
+
+    Two passes, because exports rule their tables in two different ways. The
+    first looks for drawn lines. The second infers columns from how the words
+    line up, which is what recovers a register printed without borders — the
+    common case, and the one where falling back to raw text would put a whole
+    row in a single cell and leave nothing to map.
+
+    A scanned PDF carries only pixels, so nothing comes back from either pass;
+    the honest answer is to say so and point at the vision reader.
+    """
+    import openpyxl
+    import pdfplumber
+
+    BY_TEXT = {"vertical_strategy": "text", "horizontal_strategy": "text",
+               "text_tolerance": 2, "intersection_tolerance": 5}
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    tables = pages_with_text = 0
+    inferred = False
+    text_lines: list[str] = []
+
+    def usable(table):
+        rows = [[(c or "").strip() for c in row] for row in (table or [])]
+        rows = [r for r in rows if any(r)]
+        # One row is a stray rule; one column means the split failed and the
+        # result is prose, which is worse than admitting there was no table.
+        if len(rows) < 2 or max(len(r) for r in rows) < 2:
+            return None
+        return rows
+
+    with pdfplumber.open(str(path)) as pdf:
+        pages = pdf.pages[:MAX_PDF_PAGES]
+        for pno, page in enumerate(pages, start=1):
+            found = [t for t in (usable(t) for t in (page.extract_tables() or [])) if t]
+            if not found:
+                try:
+                    found = [t for t in (usable(t) for t in
+                                         (page.extract_tables(BY_TEXT) or [])) if t]
+                    inferred = bool(found)
+                except Exception:
+                    found = []
+            for tno, rows in enumerate(found, start=1):
+                ws = wb.create_sheet(f"p{pno}_t{tno}"[:31])
+                for r in rows:
+                    ws.append(r)
+                tables += 1
+            txt = page.extract_text() or ""
+            if txt.strip():
+                pages_with_text += 1
+                text_lines.extend(txt.splitlines())
+
+    if not tables:
+        if not pages_with_text:
+            raise UnreadableUpload(
+                f"'{path.name}' is a scanned PDF — it has no text layer, so there "
+                f"are no tables to read. Send it to the signed-financial-statements "
+                f"item, which reads scans with vision."
+            )
+        import re
+
+        ws = wb.create_sheet("text")
+        for line in text_lines:
+            if line.strip():
+                ws.append(re.split(r"\s{2,}", line.strip()))
+        wb.save(dest)
+        return [f"Read {pages_with_text} page(s) of PDF text. No table structure "
+                f"was found, so each line is one row — check the split carefully."]
+
+    wb.save(dest)
+    how = "inferred from how the words line up" if inferred else "read from ruled lines"
+    return [f"Extracted {tables} table(s) from {len(pages)} PDF page(s), {how}."]
+
+
 def _legacy_xls_to_xlsx(path: Path, dest: Path) -> list[str]:
     """Genuine Excel 97-2003. Needs xlrd<2, which is not a hard dependency."""
     try:
@@ -144,6 +225,8 @@ def normalize(path: str | Path, raw: bytes | None = None) -> tuple[Path, list[st
         return dest, _text_to_xlsx(raw, dest)
     if kind == "xls_legacy":
         return dest, _legacy_xls_to_xlsx(path, dest)
+    if kind == "pdf":
+        return dest, _pdf_to_xlsx(path, dest)
 
     raise UnreadableUpload(
         f"'{path.name}' is neither a workbook nor a delimited text export — "

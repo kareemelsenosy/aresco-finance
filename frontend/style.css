@@ -630,3 +630,19 @@ dialog .actions { display: flex; gap: 8px; justify-content: flex-end; padding: 0
   .intake-act { width: 100%; }
   .intake-act .btn { width: 100%; }
 }
+
+/* --- drop anywhere ------------------------------------------------------ */
+/* The item list below is the deliberate route; this is for when you have the
+   file but not the patience to find its row. */
+.dropzone {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 26px 20px; margin: 0 0 18px;
+  border: 1.5px dashed var(--line); border-radius: 14px;
+  background: var(--surface-2); text-align: center;
+  transition: border-color .15s, background .15s;
+}
+.dropzone.over { border-color: var(--gold, #b8860b); background: var(--surface-3); }
+.dropzone.busy { opacity: .6; pointer-events: none; }
+.dropzone b { font: 600 14px var(--font-display); color: var(--ink); }
+.dropzone .muted { max-width: 62ch; font-size: 12.5px; line-height: 1.5; }
+.dropzone .btn { margin-top: 4px; cursor: pointer; }

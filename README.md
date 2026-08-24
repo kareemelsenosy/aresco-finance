@@ -160,6 +160,30 @@ every value is still read from the cell and typed by the same parsers the
 loaders use; a hallucinated number has no route into the ledger. The result is a
 plan and a preview on screen, and nothing is written until it is confirmed.
 
+### Upload replaces, it does not accumulate
+
+A team re-sends the same register with corrections far more often than they send
+a genuinely new one, so an upload supersedes the last one for that item rather
+than stacking on top of it. Every row carries the `source_file` it arrived in;
+loading a new file for an item deletes the rows earlier uploads of *that* item
+wrote and leaves everything else — other items, and anything entered by hand —
+alone.
+
+The loader runs with the transaction held open. It clears the rows it is about
+to rewrite, so a file that turns out to be unreadable would otherwise destroy
+what it was meant to replace; holding the transaction makes the rollback real,
+and a failed upload leaves the previous version exactly where it was.
+
+### Drop anything, anywhere
+
+`POST /intake/auto/upload` takes a file without being told what it is. The
+contents decide which of the sixteen requests it answers — the file name is
+evidence of nothing, being stale, misspelt and reused — and it then follows the
+identical path as if it had been filed by hand. What it decided, how sure it
+was, and the runner-up are shown on the result, so a wrong call is visible
+rather than quietly acted on. A file that matches nothing is refused: one that
+never arrived gets chased, one filed in the wrong register is believed.
+
 `ingest/normalize.py` runs before any of this and settles what the file actually
 is. An extension is a claim: Treasury's cheque register arrives as `.XLS` and is
 really a UTF-16 tab-separated ERP dump. It is converted to a real workbook rather

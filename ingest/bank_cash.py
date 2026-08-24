@@ -49,7 +49,8 @@ def _canonical_bank(raw: str, lookup: dict[str, str]) -> str:
     return clean_str(raw)  # unknown bank — keep the raw label, don't drop the money
 
 
-def ingest_bank_cash(db: Session, path: str, replace: bool = True) -> dict:
+def ingest_bank_cash(db: Session, path: str, replace: bool = True,
+                     commit: bool = True) -> dict:
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     lookup = _bank_lookup(db)
     warnings: list[str] = []
@@ -134,7 +135,10 @@ def ingest_bank_cash(db: Session, path: str, replace: bool = True) -> dict:
         ok=rows_out > 0,
     )
     db.add(log)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     return {
         "kind": "bank_cash",

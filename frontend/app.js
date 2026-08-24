@@ -1703,9 +1703,53 @@ views.intake = async function () {
       <div class="tile gold"><div class="k">Overdue</div><div class="v">${c.overdue}</div><div class="n">past their frequency</div></div>
       <div class="tile ${c.never ? 'bad' : 'grey'}"><div class="k">Never received</div><div class="v">${c.never}</div><div class="n">nothing loaded yet</div></div>
     </div>
+    <div class="dropzone" id="dropzone"
+         ondragover="event.preventDefault();this.classList.add('over')"
+         ondragleave="this.classList.remove('over')"
+         ondrop="intakeDrop(event)">
+      <b>Drop any file here</b>
+      <span class="muted">Workbook, CSV, an export from your system, or a PDF —
+        the contents decide which item it belongs to. Nothing is written until you confirm.</span>
+      <label class="btn">Choose a file
+        <input type="file" hidden onchange="intakeAuto(this.files[0], this)">
+      </label>
+    </div>
     <div id="intake-result"></div>
     ${sections}`;
 };
+
+function intakeDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('over');
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) intakeAuto(f, e.currentTarget);
+}
+
+/* Upload without saying what it is. The server identifies it, then runs exactly
+   the same path as if it had been filed against that item by hand. */
+async function intakeAuto(file, el) {
+  if (!file) return;
+  const box = document.getElementById('intake-result');
+  const zone = document.getElementById('dropzone');
+  if (zone) zone.classList.add('busy');
+  box.innerHTML = notice('info', 'Reading…',
+    `Working out what <b>${esc(file.name)}</b> is.`);
+  box.scrollIntoView({behavior: 'smooth', block: 'start'});
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch(API + '/intake/auto/upload', {method: 'POST', body: fd});
+    const out = await res.json();
+    if (!res.ok) throw new Error(errText(out));
+    handleIntakeResult(out.req_id, out, box);
+  } catch (err) {
+    box.innerHTML = notice('bad', 'Could not place that file', esc(err.message));
+  } finally {
+    if (zone) zone.classList.remove('busy');
+    if (el && el.value !== undefined) el.value = '';
+  }
+}
 
 const intakeState = {reqs: {}, pending: null};
 
@@ -1759,27 +1803,46 @@ async function intakeUpload(reqId, input) {
     const out = await res.json();
     if (!res.ok) throw new Error(out.detail || `Upload failed (${res.status})`);
 
-    if (out.status === 'loaded' || out.status === 'filed') {
-      box.innerHTML = notice('ok', 'Loaded',
-        `<b>${esc(out.file)}</b> — ${intakeSummary(out)}`);
-      views.intake();
-    } else if (out.mode === 'mapping') {
-      intakeState.pending = out;
-      box.innerHTML = renderMapping(reqId, out);
-      box.scrollIntoView({behavior: 'smooth', block: 'start'});
-    } else if (out.mode === 'repair') {
-      intakeState.pending = out;
-      box.innerHTML = renderRepair(reqId, out);
-      box.scrollIntoView({behavior: 'smooth', block: 'start'});
-    } else if (out.mode === 'fs_pdf') {
-      box.innerHTML = notice('warn', 'Transcribed — needs review',
-        `<b>${esc(out.file)}</b> was read with vision. Check the cross-footing report
-         under Data &amp; Sources before it is loaded into reporting.`);
-    }
+    handleIntakeResult(reqId, out, box);
   } catch (err) {
     box.innerHTML = notice('bad', 'Could not read that file', esc(err.message));
   } finally {
     row.classList.remove('busy');
+  }
+}
+
+/* Where an upload was placed when the item wasn't given. Shown on every result
+   so a wrong call is visible rather than just quietly acted on. */
+function identifiedLine(out) {
+  const i = out.identified;
+  if (!i) return '';
+  const item = intakeState.reqs[out.req_id];
+  const conf = i.confidence === 'high' ? 'ok' : i.confidence === 'medium' ? 'warn' : 'bad';
+  return `<div class="muted" style="margin-top:8px;font-size:12.5px">
+      Filed as <b>item ${out.item_no ?? '?'} — ${esc(item ? item.need : out.req_id)}</b>
+      <span class="badge ${conf}">${esc(i.confidence)}</span><br>
+      ${esc(i.what_it_is || '')}
+      ${i.runner_up ? `<br>Next closest: <code>${esc(i.runner_up)}</code>` : ''}
+    </div>`;
+}
+
+function handleIntakeResult(reqId, out, box) {
+  if (out.status === 'loaded' || out.status === 'filed') {
+    box.innerHTML = notice('ok', 'Loaded',
+      `<b>${esc(out.file)}</b> — ${intakeSummary(out)}` + identifiedLine(out));
+    views.intake();
+  } else if (out.mode === 'mapping') {
+    intakeState.pending = out;
+    box.innerHTML = renderMapping(reqId, out);
+    box.scrollIntoView({behavior: 'smooth', block: 'start'});
+  } else if (out.mode === 'repair') {
+    intakeState.pending = out;
+    box.innerHTML = renderRepair(reqId, out);
+    box.scrollIntoView({behavior: 'smooth', block: 'start'});
+  } else if (out.mode === 'fs_pdf') {
+    box.innerHTML = notice('warn', 'Transcribed — needs review',
+      `<b>${esc(out.file)}</b> was read with vision. Check the cross-footing report
+       under Data &amp; Sources before it is loaded into reporting.` + identifiedLine(out));
   }
 }
 
@@ -1791,6 +1854,7 @@ function intakeSummary(out) {
   if (out.loaded !== undefined) bits.push(`${out.loaded} loaded`);
   if (out.rows_out !== undefined) bits.push(`${out.rows_out} rows`);
   if (out.failed) bits.push(`${out.failed} rejected`);
+  if (out.replaced_total) bits.push(`${out.replaced_total} replaced from the previous upload`);
   return bits.join(' · ') || 'done';
 }
 
@@ -1878,6 +1942,7 @@ function renderRepair(reqId, m) {
           ${m.diagnosis ? `<b>What it looks like:</b> ${esc(m.diagnosis)}` : ''}
         </p>
         <p class="muted" style="margin:0 0 14px;font-size:12.5px">${provenance}</p>
+        ${identifiedLine(m)}
         ${notes.length ? noticeList(notes, 'info', 'About this file') : ''}
         ${m.warnings.length ? noticeList(m.warnings, 'warn', 'Worth reading first') : ''}
         <p class="muted" style="margin:0 0 14px">

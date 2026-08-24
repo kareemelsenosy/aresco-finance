@@ -289,3 +289,103 @@ def repair(target: str, path: str | Path, filename: str, error: str) -> dict:
     result["read_by"] = meta
     result["sheets_considered"] = [s["sheet"] for s in sheets]
     return result
+
+
+# --- working out what a file even is ---------------------------------------
+
+def _identify_schema(ids: list[str]) -> dict:
+    """Built per call so req_id is an enum of the ids that actually exist.
+
+    Left as a free string the model answers with the item *number* — "2" for the
+    cheque register — which matches no id and reads as "nothing fits". An enum
+    removes the choice.
+    """
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "req_id": {
+                "type": "string",
+                "enum": ids + [""],
+                "description": "id of the requirement this file satisfies. Empty "
+                               "only when the file matches none of them.",
+            },
+            "what_it_is": {
+                "type": "string",
+                "description": "What the file actually contains, in one sentence",
+            },
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            "runner_up": {"type": "string", "enum": ids + [""],
+                          "description": "The next most likely id, or empty"},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["req_id", "what_it_is", "confidence", "runner_up", "warnings"],
+    }
+
+
+IDENTIFY_SYSTEM = """You decide which data request an uploaded finance file answers.
+
+You get the file name, its sheets, and the first rows of each. Pick the one
+requirement it belongs to, and answer with its id — the text before the dash,
+like `cheques` or `trade_finance`. Never answer with the item number.
+
+Rules:
+- Judge on the contents, not the file name. Names are stale, misspelt, and
+  reused; the columns and the values are the evidence.
+- Pick the requirement whose description the file actually answers. Where two
+  fit, choose the one whose format matches and name the other in runner_up.
+- Return an empty req_id only when nothing fits at all. A file parked in the
+  wrong register is worse than one that was not filed — an unfiled file gets
+  chased, a misfiled one is silently believed.
+- Warn when the file looks like it holds several different registers, or covers
+  a period that seems stale.
+- Keep warnings short. A handful of clauses, not paragraphs."""
+
+
+def identify(filename: str, path: str | Path) -> dict:
+    """Work out which requirement an unlabelled upload belongs to."""
+    from api.intake import BY_ID, REQUIREMENTS
+
+    sheets = survey(path)
+    if not sheets:
+        raise ValueError(f"{filename} has no readable worksheets.")
+
+    catalogue = "\n".join(
+        f"  {r['id']} — {r['need']} ({r['team']}, item {r['no']})"
+        for r in REQUIREMENTS
+    )
+    parts = [
+        "The data requests, one of which this file answers:",
+        catalogue,
+        "",
+        f"Uploaded file: {filename}",
+        f"It has {len(sheets)} sheet(s):",
+    ]
+    # Identification only needs the shape, not the whole grid — a wide sheet
+    # would otherwise crowd out the answer and get the reply truncated.
+    for s in sheets[:25]:
+        parts.append("")
+        parts.append(f"--- sheet {s['sheet']!r}  (range {s['dimensions']})")
+        for i, row in enumerate(s["sample_rows"][:6]):
+            trimmed = [c[:24] for c in row[:14]]
+            while trimmed and not trimmed[-1]:
+                trimmed.pop()
+            parts.append(f"  [{i}] {trimmed}")
+
+    ids = [r["id"] for r in REQUIREMENTS]
+    plan, meta = llm.complete_json("\n".join(parts), IDENTIFY_SYSTEM,
+                                   _identify_schema(ids), max_tokens=4000)
+
+    # Be liberal about what comes back: an item number, or the id with the
+    # number attached, both still name a real requirement.
+    raw = str(plan.get("req_id") or "").strip()
+    if raw and raw not in BY_ID:
+        by_no = {str(r["no"]): r["id"] for r in REQUIREMENTS}
+        plan["req_id"] = by_no.get(raw.lstrip("#item ").strip(), "")
+        if plan["req_id"]:
+            plan.setdefault("warnings", []).append(
+                f"Answered with item number {raw!r}; read as {plan['req_id']}.")
+
+    plan["identified_by"] = meta
+    plan["sheets_considered"] = [s["sheet"] for s in sheets]
+    return plan

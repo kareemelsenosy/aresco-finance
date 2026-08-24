@@ -256,7 +256,8 @@ def _ingest_expenses(db: Session, ws, snapshot: date, fname: str, replace: bool)
     return count
 
 
-def ingest_cash_in(db: Session, path: str, replace: bool = True) -> dict:
+def ingest_cash_in(db: Session, path: str, replace: bool = True,
+                   commit: bool = True) -> dict:
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     fname = path.rsplit("/", 1)[-1]
     warnings: list[str] = []
@@ -336,7 +337,10 @@ def ingest_cash_in(db: Session, path: str, replace: bool = True) -> dict:
             ok=True,
         )
     )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     return {
         "kind": "cash_in",

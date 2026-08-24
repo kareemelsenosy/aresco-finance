@@ -65,7 +65,8 @@ def _column_index(header: list, *names: str):
     return None
 
 
-def ingest_checks(db: Session, path: str, replace: bool = True) -> dict:
+def ingest_checks(db: Session, path: str, replace: bool = True,
+                  commit: bool = True) -> dict:
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     statuses = _status_map(db)
     banks = _bank_names(db)
@@ -221,7 +222,10 @@ def ingest_checks(db: Session, path: str, replace: bool = True) -> dict:
             ok=rows_out > 0,
         )
     )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     return {
         "kind": "checks",
