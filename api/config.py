@@ -3,8 +3,12 @@ from pathlib import Path
 
 
 class Settings(BaseSettings):
-    # --- LLM provider (audit agent) ---
-    llm_provider: str = "anthropic"
+    # --- LLM providers ---
+    # Tried left to right; one with no key is skipped, and if the first errors
+    # the next takes the call. Keeping both configured means an outage or a rate
+    # limit on one provider doesn't stop a team uploading their file.
+    llm_order: str = "openai,anthropic"
+    llm_provider: str = "anthropic"   # audit agent still pins a single provider
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-5"
     openai_api_key: str = ""

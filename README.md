@@ -15,15 +15,20 @@ deploy.
 cd Finance/finance-app
 python3.13 -m venv .venv                 # 3.14 has no wheel for pydantic-core yet
 ./.venv/bin/pip install -r requirements.txt
-cp .env.example .env                     # add ANTHROPIC_API_KEY for the audit assistant
+cp .env.example .env                     # add OPENAI_API_KEY / ANTHROPIC_API_KEY
 ./.venv/bin/python scripts/ingest_all.py ..   # load the workbooks in Finance/
 ./.venv/bin/uvicorn api.main:app --port 8100
 ```
 
 Then open **http://127.0.0.1:8100/app/** — API docs are at `/docs`.
 
-Only the audit assistant and the scanned-PDF reader need an API key. Every other
-module works without one.
+An API key is needed by the audit assistant, the scanned-PDF reader, and the
+upload repair path. Every other module works without one.
+
+`LLM_ORDER` (default `openai,anthropic`) sets which provider is asked first. A
+provider with no key is skipped, and if the first one errors the second takes
+the call — so a rate limit or an outage on one side doesn't stop a team
+uploading their file. The review screen names whichever model actually read it.
 
 ---
 
@@ -139,6 +144,26 @@ module works without one.
 | `Cash-In *.xlsx` | `ingest/cash_in.py` | receivables, forecast inflows, expenses, **the day's FX rates** |
 | `Aresco BP - *.xlsx` | `ingest/business_plan.py` | IS/BS/CF, ratios, projects, macro assumptions |
 | `* FS *.pdf` (scanned) | `ingest/fs_pdf.py` | audited statements, read with vision |
+
+### When a workbook no longer matches its loader
+
+Each loader above knows one file's shape, which makes it exact and free — and
+brittle the moment that shape moves. A sheet renamed `Cash-In (2)`, a column
+relabelled `Customer Name` instead of `Project Name`, the register moved to the
+fourteenth tab: any of these used to mean a hard failure or, worse, a cheerful
+`200 loaded` with none of the rows the item exists for.
+
+`ingest/repair.py` catches both cases. It surveys every sheet, sends the layout
+(not the data) to the model, and asks *where* the register is — which sheet,
+which header row, which column feeds which field. The answer is coordinates, so
+every value is still read from the cell and typed by the same parsers the
+loaders use; a hallucinated number has no route into the ledger. The result is a
+plan and a preview on screen, and nothing is written until it is confirmed.
+
+`ingest/normalize.py` runs before any of this and settles what the file actually
+is. An extension is a claim: Treasury's cheque register arrives as `.XLS` and is
+really a UTF-16 tab-separated ERP dump. It is converted to a real workbook rather
+than rejected at the door.
 
 The signed statements and the plan name the same lines differently
 (`Revenues from contracts with customers` vs `Total Revenues`), so

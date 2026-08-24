@@ -19,13 +19,15 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from api.config import settings
 from api.database import get_db
 from api.intake import BY_ID, REQUIREMENTS, TEAM_ORDER, log_kind
 from api.models import IngestLog
-from ingest import ai_table
+from ingest import ai_table, llm, repair
+from ingest.normalize import UnreadableUpload, normalize
 
 router = APIRouter(prefix="/intake", tags=["intake"])
 
@@ -34,6 +36,28 @@ WORKBOOK_LOADERS = {
     "checks": "ingest.checks:ingest_checks",
     "cash_in": "ingest.cash_in:ingest_cash_in",
     "business_plan": "ingest.business_plan:ingest_business_plan",
+}
+
+
+# When a workbook loader fails, the data still has to land somewhere. This is
+# the register each requirement's rows belong in once a repair has read them.
+REPAIR_TARGET = {
+    "bank_balances": "bank_balances",
+    "cheques": "checks",
+    "ar_position": "receivables",
+    "business_plan": "financial_lines",
+    "consolidated": "financial_lines",
+    "management_accounts": "financial_lines",
+}
+
+# How many rows of the thing the requirement actually exists for. A loader that
+# reports success having written none of these has not really loaded the file —
+# Cash-In writing expense lines but no receivables is the case in point.
+PRIMARY_COUNT = {
+    "bank_cash": lambda r: r.get("rows", 0),
+    "checks": lambda r: r.get("checks_ingested", 0),
+    "cash_in": lambda r: r.get("receivables", 0) + r.get("forecast_inflows", 0),
+    "business_plan": lambda r: r.get("financial_lines", 0),
 }
 
 
@@ -116,11 +140,52 @@ def requirements(db: Session = Depends(get_db)):
             "overdue": sum(1 for i in items if i["state"] == "overdue"),
             "current": sum(1 for i in items if i["state"] in ("current", "received")),
         },
-        "ai_available": bool(settings.anthropic_api_key),
+        "ai_available": bool(llm.available()),
+        "ai_providers": llm.available(),
     }
 
 
 # --- upload ----------------------------------------------------------------
+
+
+async def _repair_response(req_id: str, req: dict, filename: str,
+                           path, reason: str, notes: list[str]):
+    """Hand the file to the AI reader and return a plan to review.
+
+    The read is a blocking, multi-second call to a provider. On the event loop
+    it would stall every other request for its whole duration, so it goes to a
+    worker thread.
+    """
+    # Workbook requirements need the map — their handler names a loader, not a
+    # register. A register:/ai: handler already names the target it writes into.
+    target = REPAIR_TARGET.get(req_id)
+    if not target:
+        handler_kind, _, handler_target = req["handler"].partition(":")
+        if handler_kind in ("register", "ai") and handler_target in ai_table.TARGETS:
+            target = handler_target
+    if not target:
+        raise HTTPException(422, f"Could not read {filename}: {reason}")
+
+    try:
+        plan = await run_in_threadpool(repair.repair, target, path, filename, reason)
+    except llm.NoProviderError as exc:
+        raise HTTPException(503, str(exc))
+    except llm.AllProvidersFailed as exc:
+        raise HTTPException(502, str(exc))
+    except Exception as exc:
+        raise HTTPException(422, f"Could not read {filename}: {reason} "
+                                 f"(and the AI reader also failed: "
+                                 f"{type(exc).__name__}: {exc})")
+
+    return {
+        "status": "needs_review",
+        "mode": "repair",
+        "req_id": req_id,
+        "file": filename,
+        "why": reason,
+        "conversion_notes": notes,
+        **plan,
+    }
 
 
 @router.post("/{req_id}/upload")
@@ -129,9 +194,11 @@ async def upload(req_id: str, file: UploadFile = File(...),
     """
     Take a file for one requirement.
 
-    Returns either `status: loaded` — it went straight into an existing loader —
-    or `status: needs_review` with a proposed column mapping and a typed
-    preview. Nothing is written in the second case until /confirm.
+    The dedicated loader gets it first — it is exact and costs nothing. If the
+    file's shape has moved and the loader either fails or comes back with none
+    of the rows the requirement exists for, the AI reader takes over, works out
+    where the data actually is, and returns a plan to confirm. Nothing is
+    written on that path until /confirm.
     """
     req = BY_ID.get(req_id)
     if not req:
@@ -139,10 +206,6 @@ async def upload(req_id: str, file: UploadFile = File(...),
     handler = req["handler"]
     if handler == "in_tool":
         raise HTTPException(400, f"{req['need']} is done in the tool, not uploaded.")
-
-    accepts = tuple(a.strip() for a in (req.get("accepts") or "").split(",") if a.strip())
-    if accepts and not file.filename.lower().endswith(accepts):
-        raise HTTPException(400, f"{req['need']} expects {' or '.join(accepts)}.")
 
     raw = await file.read()
     if not raw:
@@ -160,20 +223,9 @@ async def upload(req_id: str, file: UploadFile = File(...),
         return {"status": "filed", "file": file.filename,
                 "message": "Filed for the record. Nothing to parse in this one."}
 
-    if kind == "workbook":
-        try:
-            result = _loader(target)(db, str(dest), replace=True)
-        except Exception as exc:
-            db.rollback()
-            raise HTTPException(422, f"Could not read {file.filename}: "
-                                     f"{type(exc).__name__}: {exc}")
-        db.add(IngestLog(file_name=file.filename, kind=log_kind(req_id),
-                         rows_in=result.get("rows_in") or 0,
-                         rows_out=result.get("rows_out") or 0, ok=True))
-        db.commit()
-        return {"status": "loaded", "file": file.filename, **result}
-
     if kind == "fs_pdf":
+        if not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(400, f"{req['need']} expects a PDF.")
         from ingest.fs_pdf import extract_fs_pdf
 
         try:
@@ -187,6 +239,37 @@ async def upload(req_id: str, file: UploadFile = File(...),
                 "message": "Vision transcription — check the cross-footing report "
                            "before loading."}
 
+    # Everything else has to be a table. The extension is only a claim, so the
+    # bytes decide: a .XLS that is really a tab-separated ERP dump is converted
+    # here rather than rejected at the door.
+    try:
+        readable, notes = normalize(dest, raw)
+    except UnreadableUpload as exc:
+        raise HTTPException(400, str(exc))
+
+    if kind == "workbook":
+        try:
+            result = _loader(target)(db, str(readable), replace=True)
+        except Exception as exc:
+            db.rollback()
+            return await _repair_response(req_id, req, file.filename, readable,
+                                          f"{type(exc).__name__}: {exc}", notes)
+
+        loaded = PRIMARY_COUNT.get(target, lambda r: 1)(result)
+        if not loaded:
+            why = "; ".join(result.get("warnings") or []) or \
+                  "the loader read the file but found none of the rows this item is for"
+            return await _repair_response(req_id, req, file.filename, readable, why, notes)
+
+        db.add(IngestLog(file_name=file.filename, kind=log_kind(req_id),
+                         rows_in=result.get("rows_in") or 0,
+                         rows_out=result.get("rows_out") or loaded, ok=True))
+        db.commit()
+        out = {"status": "loaded", "file": file.filename, **result}
+        if notes:
+            out["conversion_notes"] = notes
+        return out
+
     # register:* and ai:* both end up here. A register file whose headers already
     # match the template needs no model call, so try that first.
     if kind == "register":
@@ -199,6 +282,19 @@ async def upload(req_id: str, file: UploadFile = File(...),
             db.commit()
             return {"status": "loaded", "file": file.filename, "via": "template",
                     **native}
+
+    # A multi-sheet workbook defeats the flat column mapper, which only ever sees
+    # the first sheet. Send those through the repair reader, which surveys them all.
+    if str(readable).lower().endswith((".xlsx", ".xlsm")):
+        import openpyxl
+
+        wb = openpyxl.load_workbook(readable, read_only=True)
+        multi = len(wb.sheetnames) > 1
+        wb.close()
+        if multi:
+            return await _repair_response(req_id, req, file.filename, readable,
+                                          "the workbook has several sheets, so which one "
+                                          "holds the register had to be worked out", notes)
 
     try:
         plan = ai_table.map_table(target, file.filename, raw)

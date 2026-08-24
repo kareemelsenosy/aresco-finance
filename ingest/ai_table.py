@@ -26,7 +26,8 @@ from sqlalchemy.orm import Session
 
 from api.config import settings
 from api.models import (
-    Customer, DownPayment, FinancialLine, IngestLog, Project, ProjectCost,
+    BankBalance, Check, Customer, DownPayment, FinancialLine, IngestLog,
+    Project, ProjectCost,
     PurchaseOrder, PurchaseRequisition, Receivable, TaxObligation,
     TradeFinanceFacility,
 )
@@ -99,6 +100,37 @@ TARGETS: dict[str, dict] = {
             "amount": "Amount in that currency",
         },
         "required": ["line_item", "amount"],
+    },
+    # The two workbook registers. These have dedicated loaders and normally never
+    # come through here — they are the fallback for when a team's export no longer
+    # matches the workbook its loader was written against.
+    "checks": {
+        "model": Check,
+        "label": "Issued cheque register",
+        "fields": {
+            "check_number": "Cheque / instrument number",
+            "supplier_name": "Who the cheque is payable to — payee, drawer or beneficiary",
+            "bank_name": "Bank the cheque is drawn on",
+            "currency": "Currency code, e.g. EGP or USD",
+            "value": "Face value of the cheque in that currency",
+            "check_date": "Date on the cheque, or its due date",
+            "raw_status": "Status exactly as the source writes it — delivered, "
+                          "under collection, on hand. Leave unmapped if absent.",
+            "snapshot_date": "The 'as at' date of the extract",
+            "serial_no": "Row serial or document number, if the export carries one",
+        },
+        "required": ["check_number", "value"],
+    },
+    "bank_balances": {
+        "model": BankBalance,
+        "label": "Daily bank balances",
+        "fields": {
+            "bank_name": "Bank, and the account if the export names one",
+            "currency": "Currency code, e.g. EGP or USD",
+            "amount": "Closing balance in that currency",
+            "balance_date": "Date the balance is as at",
+        },
+        "required": ["bank_name", "amount"],
     },
     # The five registers that already have templates. Mapping is only used when
     # the uploaded headers do not match the template outright.
@@ -484,6 +516,18 @@ def _post_fill(db: Session, target: str, obj, raw_row: dict):
     elif target == "financial_lines":
         obj.scenario = obj.scenario or "actual"
         obj.scope = obj.scope or "standalone"
+    elif target == "checks":
+        obj.snapshot_date = obj.snapshot_date or obj.check_date or date.today()
+        obj.source_file = obj.source_file or "intake"
+        # A source with no status column cannot say a cheque was handed over.
+        # Recording that as "not delivered" and flagging status_known=False keeps
+        # it out of the cash position instead of quietly counting it as paid.
+        if not obj.raw_status:
+            obj.delivered = False
+            obj.status_known = False
+    elif target == "bank_balances":
+        obj.balance_date = obj.balance_date or date.today()
+        obj.source_file = obj.source_file or "intake"
     elif target == "down-payments":
         if obj.amount is not None and not obj.amount_egp:
             obj.amount_egp = _to_egp(db, obj.amount, obj.currency)

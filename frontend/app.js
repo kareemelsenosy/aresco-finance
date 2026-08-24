@@ -14,6 +14,22 @@ const send = (p, method, body) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   }).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)));
 
+/* FastAPI reports a validation failure as detail: [{loc, msg, type}, ...].
+   Rendering that object directly is where "[object Object]" came from. */
+function errText(e) {
+  if (!e) return 'Unknown error';
+  if (typeof e === 'string') return e;
+  const d = e.detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) {
+    return d.map(x => {
+      const where = Array.isArray(x.loc) ? x.loc.filter(p => p !== 'query' && p !== 'body').join('.') : '';
+      return where ? `${where}: ${x.msg}` : x.msg;
+    }).join('; ') || 'Request rejected';
+  }
+  return e.message || JSON.stringify(e);
+}
+
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -288,7 +304,11 @@ views.cash = async function () {
     <td class="cons">${f0(bal.total_egp)}</td></tr>`);
 
   const mixCols = {EGP: 'var(--steel-deep)', USD: 'var(--steel)', EUR: 'var(--gold)', AED: 'var(--ink-3)'};
-  const fxNow = await get('/fx/current?as_of=' + cash.as_of);
+  // With no balances loaded there is no as-of date. Sending it anyway put the
+  // string "null" in the query and the endpoint rejected it as a bad date,
+  // which took down the whole dashboard on an empty database.
+  const fxNow = await get('/fx/current'
+    + (cash.as_of ? '?as_of=' + encodeURIComponent(cash.as_of) : ''));
   const mix = ccys.map(c => {
     const r = fxNow.rates[c];
     return {ccy: c, native: bal.by_currency[c], egp: r === undefined ? null : bal.by_currency[c] * r, col: mixCols[c]};
@@ -1612,8 +1632,7 @@ async function render() {
   try {
     await (views[nav.id] || views.cash)();
   } catch (e) {
-    page.innerHTML = notice('bad', 'Could not load this view',
-      esc(e.detail || e.message || JSON.stringify(e)));
+    page.innerHTML = notice('bad', 'Could not load this view', esc(errText(e)));
   }
 }
 
@@ -1674,7 +1693,9 @@ views.intake = async function () {
     <div class="intro">
       <p>Everything the tool needs, who owns it, and how often. Each row takes the file
          in whatever shape your system exports it — column names do not have to match
-         ours${data.ai_available ? '' : ' <b>(column mapping needs ANTHROPIC_API_KEY, which is not set)</b>'}.</p>
+         ours${data.ai_available
+           ? ` <span class="muted">(read by ${esc((data.ai_providers || []).join(', falling back to '))})</span>`
+           : ' <b>(reading an unfamiliar file needs OPENAI_API_KEY or ANTHROPIC_API_KEY — neither is set)</b>'}.</p>
     </div>
     <div class="tiles-4">
       <div class="tile"><div class="k">Tracked</div><div class="v">${c.total}</div><div class="n">data requirements</div></div>
@@ -1746,6 +1767,10 @@ async function intakeUpload(reqId, input) {
       intakeState.pending = out;
       box.innerHTML = renderMapping(reqId, out);
       box.scrollIntoView({behavior: 'smooth', block: 'start'});
+    } else if (out.mode === 'repair') {
+      intakeState.pending = out;
+      box.innerHTML = renderRepair(reqId, out);
+      box.scrollIntoView({behavior: 'smooth', block: 'start'});
     } else if (out.mode === 'fs_pdf') {
       box.innerHTML = notice('warn', 'Transcribed — needs review',
         `<b>${esc(out.file)}</b> was read with vision. Check the cross-footing report
@@ -1800,6 +1825,68 @@ function renderMapping(reqId, m) {
           consts.map(([k, v]) => `<code>${esc(k)}=${esc(v)}</code>`).join(' ')}</p>` : ''}
         ${m.unmapped_columns.length ? `<p class="muted" style="margin:12px 0 0">
           Ignored: ${m.unmapped_columns.map(c => `<code>${esc(c)}</code>`).join(' ')}</p>` : ''}
+        <h4 style="margin:20px 0 8px;font:600 13px var(--font-display)">First ${m.preview.length} rows as they would be saved</h4>
+        <div style="overflow-x:auto">${table(cols.map(c => `<th>${esc(c)}</th>`).join(''), preview)}</div>
+        <div class="mapping-act">
+          <button class="btn primary" onclick="intakeConfirm('${esc(reqId)}')" ${m.rows_ready ? '' : 'disabled'}>
+            Write ${m.rows_ready} row${m.rows_ready === 1 ? '' : 's'}
+          </button>
+          <button class="btn" onclick="intakeState.pending=null;document.getElementById('intake-result').innerHTML=''">Discard</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderRepair(reqId, m) {
+  const mapped = m.mapping.filter(x => x.target_field);
+  const rows = mapped.map(x => `<tr>
+    <td style="font-size:13px">${esc(x.source_column || '(column ' + x.column_index + ')')}</td>
+    <td style="font:500 12px var(--font-mono)">${esc(x.target_field)}</td>
+    <td><span class="badge ${x.confidence === 'high' ? 'ok' : x.confidence === 'medium' ? 'warn' : 'bad'}">${esc(x.confidence)}</span></td>
+    <td class="muted" style="font-size:12px">${esc(x.reason || '')}</td></tr>`);
+
+  const cols = mapped.map(x => x.target_field);
+  const preview = m.preview.map(r => `<tr>${cols.map(c =>
+    `<td style="font-size:12.5px">${esc(String(r[c] ?? ''))}</td>`).join('')}</tr>`);
+  const consts = Object.entries(m.constants || {});
+  const by = m.read_by || {};
+
+  // Everything the reviewer needs to judge whether to trust this read: what
+  // broke, where the data was found, and which model found it.
+  const provenance = [
+    `read by <b>${esc(by.provider || '?')}</b> ${esc(by.model || '')}`,
+    by.fell_back ? '<span class="badge warn">fell back</span>' : '',
+    `sheet <code>${esc(m.sheet)}</code>`,
+    `header row ${m.header_row + 1}`,
+    `confidence <span class="badge ${m.confidence === 'high' ? 'ok' : m.confidence === 'medium' ? 'warn' : 'bad'}">${esc(m.confidence)}</span>`,
+  ].filter(Boolean).join(' · ');
+
+  const notes = [...(m.conversion_notes || [])];
+  if (m.missing_required && m.missing_required.length) {
+    notes.push('Not found in this file: ' + m.missing_required.join(', '));
+  }
+
+  return `
+    <div class="card mapping">
+      <div class="card-h">
+        <h3>This file didn't match its usual layout — here's what was found</h3>
+        <span class="stamp">${esc(m.file)} → ${esc(m.label)}</span>
+      </div>
+      <div class="card-b">
+        <p class="muted" style="margin:0 0 12px">
+          <b>What went wrong:</b> ${esc(m.why || '')}<br>
+          ${m.diagnosis ? `<b>What it looks like:</b> ${esc(m.diagnosis)}` : ''}
+        </p>
+        <p class="muted" style="margin:0 0 14px;font-size:12.5px">${provenance}</p>
+        ${notes.length ? noticeList(notes, 'info', 'About this file') : ''}
+        ${m.warnings.length ? noticeList(m.warnings, 'warn', 'Worth reading first') : ''}
+        <p class="muted" style="margin:0 0 14px">
+          <b>${m.rows_ready}</b> of ${m.rows_in} rows are ready to write${m.rows_skipped ? `, ${m.rows_skipped} skipped as blank or missing a required field` : ''}.
+          Nothing has been saved yet.
+        </p>
+        ${table('<th>Column in your file</th><th>Goes to</th><th>Confidence</th><th>Why</th>', rows)}
+        ${consts.length ? `<p class="muted" style="margin:12px 0 0">Applied to every row: ${
+          consts.map(([k, v]) => `<code>${esc(k)}=${esc(v)}</code>`).join(' ')}</p>` : ''}
         <h4 style="margin:20px 0 8px;font:600 13px var(--font-display)">First ${m.preview.length} rows as they would be saved</h4>
         <div style="overflow-x:auto">${table(cols.map(c => `<th>${esc(c)}</th>`).join(''), preview)}</div>
         <div class="mapping-act">
